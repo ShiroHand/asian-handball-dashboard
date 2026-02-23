@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>22nd Asian Men's Handball Championship Dashboard</title>
+  <meta name="description"
+    content="Interactive statistics dashboard for the 22nd Asian Men's Handball Championship held in Kuwait, January 2026.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <!-- Header -->
+  <header class="header" id="header">
+    <div class="header-content">
+      <div class="header-title">
+        <div class="header-logo">🤾</div>
+        <div>
+          <h1>22nd Asian Men's Handball Championship</h1>
+          <div class="header-subtitle">Kuwait · January 2026</div>
+        </div>
+      </div>
+      <div class="header-stats" id="headerStats"></div>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="nav-tabs" id="navTabs">
+    <button class="nav-tab active" data-tab="overview">
+      <span class="nav-tab-icon">📊</span> 大会概要
+    </button>
+    <button class="nav-tab" data-tab="teams">
+      <span class="nav-tab-icon">🏆</span> チーム統計
+    </button>
+    <button class="nav-tab" data-tab="players">
+      <span class="nav-tab-icon">⭐</span> 選手ランキング
+    </button>
+    <button class="nav-tab" data-tab="matches">
+      <span class="nav-tab-icon">📋</span> 試合詳細
+    </button>
+    <button class="nav-tab" data-tab="shots">
+      <span class="nav-tab-icon">🎯</span> シュート分析
+    </button>
+    <button class="nav-tab" data-tab="goalkeepers">
+      <span class="nav-tab-icon">🧤</span> GK分析
+    </button>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="main-content">
+
+    <!-- Loading -->
+    <div class="loading" id="loadingIndicator">
+      <div class="spinner"></div>
+      <div class="loading-text">データを読み込み中...</div>
+    </div>
+
+    <!-- Tab: Overview -->
+    <section class="tab-panel active" id="tab-overview"></section>
+
+    <!-- Tab: Teams -->
+    <section class="tab-panel" id="tab-teams"></section>
+
+    <!-- Tab: Players -->
+    <section class="tab-panel" id="tab-players"></section>
+
+    <!-- Tab: Matches -->
+    <section class="tab-panel" id="tab-matches"></section>
+
+    <!-- Tab: Shots -->
+    <section class="tab-panel" id="tab-shots"></section>
+
+    <!-- Tab: Goalkeepers -->
+    <section class="tab-panel" id="tab-goalkeepers"></section>
+
+  </main>
+
+  <!-- Match Detail Modal -->
+  <div class="modal-overlay" id="matchModal">
+    <div class="modal" id="matchModalContent"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,5 @@
+.DS_Store
+26AC_OfficalResults/
+extract_mtr.py
+__pycache__/
+*.pyc
