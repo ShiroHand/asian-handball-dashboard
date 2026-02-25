@@ -19,6 +19,8 @@ const OFFICIAL_RANKING = ['BRN', 'QAT', 'KUW', 'JPN', 'KOR', 'KSA', 'IRQ', 'UAE'
 const MAIN_ROUND = ['BRN', 'QAT', 'KUW', 'JPN', 'KOR', 'KSA', 'IRQ', 'UAE'];
 const CLASSIFICATION = ['CHN', 'HKG', 'JOR', 'IRI', 'OMA', 'AUS', 'IND'];
 function officialRank(code) { const i = OFFICIAL_RANKING.indexOf(code); return i >= 0 ? i : 999; }
+function rankSort(arr) { return [...arr].sort((a, b) => officialRank(a.code) - officialRank(b.code)); }
+function mainClSep(i, cols) { return i === MAIN_ROUND.length ? `<tr><td colspan="${cols}" style="padding:2px 0;background:var(--accent-blue);opacity:0.3"></td></tr>` : ''; }
 
 // ===== Utilities =====
 function parseShotStat(s) { if (!s || s === '0/0') return [0, 0]; const m = s.match(/(\d+)\/(\d+)/); return m ? [+m[1], +m[2]] : [0, 0]; }
@@ -492,7 +494,7 @@ function renderTeams() {
   el.innerHTML = `<div class="filters-bar">${phaseFilterHtml('tmPhase')}</div><div id="tmContent"></div>`;
   const render = () => {
     const fm = filterMatches(document.getElementById('tmPhase').value);
-    const r = computeStats(fm); const sorted = Object.values(r.teamStats).filter(t => t.matches > 0).sort((a, b) => b.goalsFor - a.goalsFor);
+    const r = computeStats(fm); const sorted = rankSort(Object.values(r.teamStats).filter(t => t.matches > 0));
     document.getElementById('tmContent').innerHTML = `
       <div class="charts-grid">
         <div class="chart-card"><div class="chart-card-title">\ud83c\udfaf \u30b7\u30e5\u30fc\u30c8\u6210\u529f\u7387</div><div class="chart-wrapper"><canvas id="chartTeamRate"></canvas></div></div>
@@ -506,11 +508,11 @@ function renderTeams() {
         <th>Field</th><th>Line</th><th>Wing</th><th>Brk</th><th>Free</th><th>7m</th>
         <th>AST</th><th>ERR</th>
       </tr></thead><tbody>
-        ${sorted.map(t => {
+        ${sorted.map((t, i) => {
       const spG = t.fieldG + t.lineG + t.wingG + t.brkG + t.freeG + t.sevenG;
       const spA = t.fieldA + t.lineA + t.wingA + t.brkA + t.freeA + t.sevenA;
       const atkR = t.attacks ? ((t.goalsFor / t.attacks) * 100).toFixed(1) : '-';
-      return `<tr><td><strong>${t.code}</strong></td>
+      return `${mainClSep(i, 18)}<tr><td><strong>${t.code}</strong></td>
           <td class="num" style="font-weight:600">${t.attacks}</td><td class="num">${t.goalsFor}</td>
           <td class="num" style="color:var(--accent-cyan)">${atkR}%</td>
           <td class="num">${spG}</td><td class="num">${spA}</td><td class="num">${pct(spG, spA)}%</td>
@@ -529,11 +531,11 @@ function renderTeams() {
         <th>Field</th><th>Line</th><th>Wing</th><th>Brk</th><th>Free</th><th>7m</th>
         <th>相手ERR</th><th>警告</th><th>退場</th>
       </tr></thead><tbody>
-        ${sorted.map(t => {
+        ${sorted.map((t, i) => {
       const dR = t.defenses ? (((1 - t.goalsAgainst / t.defenses) * 100).toFixed(1)) : '-';
       const ospG = t.oppFieldG + t.oppLineG + t.oppWingG + t.oppBrkG + t.oppFreeG + t.oppSevenG;
       const ospA = t.oppFieldA + t.oppLineA + t.oppWingA + t.oppBrkA + t.oppFreeA + t.oppSevenA;
-      return `<tr><td><strong>${t.code}</strong></td>
+      return `${mainClSep(i, 19)}<tr><td><strong>${t.code}</strong></td>
           <td class="num" style="font-weight:600">${t.defenses}</td><td class="num">${t.goalsAgainst}</td>
           <td class="num" style="color:var(--accent-green)">${dR}%</td>
           <td class="num">${ospG}</td><td class="num">${ospA}</td><td class="num">${pct(ospG, ospA)}%</td>
@@ -546,6 +548,150 @@ function renderTeams() {
     }).join('')}
       </tbody></table></div>`;
     makeSortable('atkTable'); makeSortable('defTable');
+
+    // === Odds Ratio Analysis for Teams ===
+    (() => {
+      const shotTypes = [
+        { key: 'field', label: 'Field' }, { key: 'line', label: 'Line' }, { key: 'wing', label: 'Wing' },
+        { key: 'fast', label: 'Fast Brk' }, { key: 'brk', label: 'Brk Thr' }, { key: 'free', label: 'Free' }, { key: 'seven', label: '7m' }
+      ];
+      const orColor = v => v > 1.2 ? 'var(--accent-green)' : v < 0.8 ? 'var(--accent-red)' : 'var(--accent-yellow)';
+      const orColorInv = v => v > 1.2 ? 'var(--accent-red)' : v < 0.8 ? 'var(--accent-green)' : 'var(--accent-yellow)';
+      const fmtOr = v => v === Infinity ? '∞' : v > 0 ? v.toFixed(2) : '-';
+
+      // --- ATTACK OR ---
+      // 1. Team attack OR (each team's Line as ref)
+      const atkOrRows = sorted.map(tm => {
+        const tmOr = shotTypes.map(t => {
+          const g = tm[t.key + 'G'], a = tm[t.key + 'A'], miss = a - g;
+          return { key: t.key, odds: miss > 0 ? g / miss : (a > 0 && g === a ? Infinity : 0), attempts: a };
+        });
+        const tmLine = tmOr.find(d => d.key === 'line')?.odds || 0;
+        const ors = tmOr.map(d => ({
+          key: d.key,
+          or: (tmLine > 0 && tmLine !== Infinity && d.attempts > 0) ? (d.odds === Infinity ? Infinity : d.odds / tmLine) : (d.key === 'line' ? 1 : 0)
+        }));
+        return { code: tm.code, rate: tm.totalA ? (tm.totalG / tm.totalA * 100).toFixed(1) : '-', ors };
+      });
+
+      // 2. Attack OR vs JPN
+      const atkOddsMap = {};
+      sorted.forEach(tm => {
+        atkOddsMap[tm.code] = {};
+        shotTypes.forEach(t => {
+          const g = tm[t.key + 'G'], a = tm[t.key + 'A'], miss = a - g;
+          atkOddsMap[tm.code][t.key] = { odds: miss > 0 ? g / miss : (a > 0 && g === a ? Infinity : 0), a };
+        });
+        const miss = tm.totalA - tm.totalG;
+        atkOddsMap[tm.code]._total = { odds: miss > 0 ? tm.totalG / miss : 0 };
+      });
+      const jpnAtk = atkOddsMap['JPN'] || {};
+      const atkJpnRows = sorted.map(tm => {
+        const totalOr = jpnAtk._total && jpnAtk._total.odds > 0 ? (atkOddsMap[tm.code]?._total?.odds || 0) / jpnAtk._total.odds : (tm.code === 'JPN' ? 1 : 0);
+        const shotOrs = shotTypes.map(t => {
+          const ref = jpnAtk[t.key], me = atkOddsMap[tm.code]?.[t.key];
+          if (!ref || ref.odds <= 0 || ref.odds === Infinity || !me || me.a === 0) return { key: t.key, or: tm.code === 'JPN' ? 1 : 0 };
+          return { key: t.key, or: me.odds === Infinity ? Infinity : me.odds / ref.odds };
+        });
+        return { code: tm.code, rate: tm.totalA ? (tm.totalG / tm.totalA * 100).toFixed(1) : '-', totalOr, shotOrs };
+      }).sort((a, b) => officialRank(a.code) - officialRank(b.code));
+
+      // --- DEFENSE OR ---
+      // 1. Team defense OR (each team's opp Line as ref) — lower is better
+      const defOrRows = sorted.map(tm => {
+        const tmOr = shotTypes.map(t => {
+          const g = tm['opp' + t.key.charAt(0).toUpperCase() + t.key.slice(1) + 'G'] ?? tm[`opp${t.key.charAt(0).toUpperCase() + t.key.slice(1)}G`];
+          const a = tm['opp' + t.key.charAt(0).toUpperCase() + t.key.slice(1) + 'A'] ?? tm[`opp${t.key.charAt(0).toUpperCase() + t.key.slice(1)}A`];
+          const miss = a - g;
+          return { key: t.key, odds: miss > 0 ? g / miss : (a > 0 && g === a ? Infinity : 0), attempts: a };
+        });
+        const tmLine = tmOr.find(d => d.key === 'line')?.odds || 0;
+        const ors = tmOr.map(d => ({
+          key: d.key,
+          or: (tmLine > 0 && tmLine !== Infinity && d.attempts > 0) ? (d.odds === Infinity ? Infinity : d.odds / tmLine) : (d.key === 'line' ? 1 : 0)
+        }));
+        return { code: tm.code, rate: tm.defenses ? ((1 - tm.goalsAgainst / tm.defenses) * 100).toFixed(1) : '-', ors };
+      });
+
+      // 2. Defense OR vs JPN — opponent scoring odds; lower OR = better defense
+      const defOddsMap = {};
+      sorted.forEach(tm => {
+        defOddsMap[tm.code] = {};
+        shotTypes.forEach(t => {
+          const gKey = 'opp' + t.key.charAt(0).toUpperCase() + t.key.slice(1) + 'G';
+          const aKey = 'opp' + t.key.charAt(0).toUpperCase() + t.key.slice(1) + 'A';
+          const g = tm[gKey], a = tm[aKey], miss = a - g;
+          defOddsMap[tm.code][t.key] = { odds: miss > 0 ? g / miss : (a > 0 && g === a ? Infinity : 0), a };
+        });
+        const miss = (tm.goalsAgainst !== undefined ? tm.defenses - (tm.defenses - tm.goalsAgainst) : 0);
+        defOddsMap[tm.code]._total = { odds: tm.defenses && tm.goalsAgainst < tm.defenses ? tm.goalsAgainst / (tm.defenses - tm.goalsAgainst) : 0 };
+      });
+      const jpnDef = defOddsMap['JPN'] || {};
+      const defJpnRows = sorted.map(tm => {
+        const totalOr = jpnDef._total && jpnDef._total.odds > 0 ? (defOddsMap[tm.code]?._total?.odds || 0) / jpnDef._total.odds : (tm.code === 'JPN' ? 1 : 0);
+        const shotOrs = shotTypes.map(t => {
+          const ref = jpnDef[t.key], me = defOddsMap[tm.code]?.[t.key];
+          if (!ref || ref.odds <= 0 || ref.odds === Infinity || !me || me.a === 0) return { key: t.key, or: tm.code === 'JPN' ? 1 : 0 };
+          return { key: t.key, or: me.odds === Infinity ? Infinity : me.odds / ref.odds };
+        });
+        return { code: tm.code, rate: tm.defenses ? ((1 - tm.goalsAgainst / tm.defenses) * 100).toFixed(1) : '-', totalOr, shotOrs };
+      }).sort((a, b) => officialRank(a.code) - officialRank(b.code));
+
+      const html = `
+      <div class="section-title" style="margin-top:24px"><span class="icon">⚔️</span> 攻撃オッズ比（基準: 各チームのLine）</div>
+      <div class="table-container"><table class="data-table" id="tmAtkOrTable"><thead><tr>
+        <th>チーム</th><th>成功率</th>${shotTypes.map(t => `<th>${t.label}</th>`).join('')}
+      </tr></thead><tbody>
+        ${rankSort(atkOrRows).map((r, i) => `${mainClSep(i, 9)}<tr><td><strong>${r.code}</strong></td><td class="num">${r.rate}%</td>
+          ${r.ors.map(o => `<td class="num" style="font-weight:${o.key === 'line' ? '400' : '600'};color:${o.key === 'line' ? 'var(--text-muted)' : orColor(o.or === Infinity ? 9 : o.or)}">${o.key === 'line' ? '1.00' : fmtOr(o.or)}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody></table></div>
+      <div class="section-title" style="margin-top:24px"><span class="icon">🇯🇵</span> 攻撃オッズ比（基準: JPN）</div>
+      <div class="chart-card" style="padding:12px 20px;margin-bottom:16px"><div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.5">
+        <span style="color:var(--accent-green)">OR &gt; 1.2</span>: JPNより決めやすい　
+        <span style="color:var(--accent-yellow)">0.8〜1.2</span>: 同等　
+        <span style="color:var(--accent-red)">OR &lt; 0.8</span>: 決めにくい
+      </div></div>
+      <div class="table-container"><table class="data-table" id="tmAtkJpnTable"><thead><tr>
+        <th>国</th><th>成功率</th><th>総合OR</th>${shotTypes.map(t => `<th>${t.label}</th>`).join('')}
+      </tr></thead><tbody>
+        ${atkJpnRows.map((r, i) => `${mainClSep(i, 10)}<tr style="${r.code === 'JPN' ? 'background:rgba(99,115,255,0.08)' : ''}">
+          <td><strong>${r.code}</strong></td><td class="num">${r.rate}%</td>
+          <td class="num" style="font-weight:700;color:${r.code === 'JPN' ? 'var(--text-muted)' : orColor(r.totalOr === Infinity ? 9 : r.totalOr)}">${r.code === 'JPN' ? '1.00' : fmtOr(r.totalOr)}</td>
+          ${r.shotOrs.map(o => `<td class="num" style="font-weight:${r.code === 'JPN' ? '400' : '600'};color:${r.code === 'JPN' ? 'var(--text-muted)' : orColor(o.or === Infinity ? 9 : o.or)}">${r.code === 'JPN' ? '1.00' : fmtOr(o.or)}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody></table></div>
+      <div class="section-title" style="margin-top:24px"><span class="icon">🛡️</span> 守備オッズ比（基準: 各チームの被Line）</div>
+      <div class="chart-card" style="padding:12px 20px;margin-bottom:16px"><div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.5">
+        相手の得点オッズ。<span style="color:var(--accent-red)">OR &gt; 1.2</span>: 被Lineより失点しやすい　
+        <span style="color:var(--accent-yellow)">0.8〜1.2</span>: 同等　
+        <span style="color:var(--accent-green)">OR &lt; 0.8</span>: 失点しにくい
+      </div></div>
+      <div class="table-container"><table class="data-table" id="tmDefOrTable"><thead><tr>
+        <th>チーム</th><th>守備成功率</th>${shotTypes.map(t => `<th>${t.label}</th>`).join('')}
+      </tr></thead><tbody>
+        ${rankSort(defOrRows).map((r, i) => `${mainClSep(i, 9)}<tr><td><strong>${r.code}</strong></td><td class="num">${r.rate}%</td>
+          ${r.ors.map(o => `<td class="num" style="font-weight:${o.key === 'line' ? '400' : '600'};color:${o.key === 'line' ? 'var(--text-muted)' : orColorInv(o.or === Infinity ? 9 : o.or)}">${o.key === 'line' ? '1.00' : fmtOr(o.or)}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody></table></div>
+      <div class="section-title" style="margin-top:24px"><span class="icon">🇯🇵</span> 守備オッズ比（基準: JPN）</div>
+      <div class="chart-card" style="padding:12px 20px;margin-bottom:16px"><div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.5">
+        相手の得点オッズ比（vs JPN）。<span style="color:var(--accent-green)">OR &lt; 0.8</span>: JPNより守備良い　
+        <span style="color:var(--accent-yellow)">0.8〜1.2</span>: 同等　
+        <span style="color:var(--accent-red)">OR &gt; 1.2</span>: 守備弱い
+      </div></div>
+      <div class="table-container"><table class="data-table" id="tmDefJpnTable"><thead><tr>
+        <th>国</th><th>守備成功率</th><th>総合OR</th>${shotTypes.map(t => `<th>${t.label}</th>`).join('')}
+      </tr></thead><tbody>
+        ${defJpnRows.map((r, i) => `${mainClSep(i, 10)}<tr style="${r.code === 'JPN' ? 'background:rgba(99,115,255,0.08)' : ''}">
+          <td><strong>${r.code}</strong></td><td class="num">${r.rate}%</td>
+          <td class="num" style="font-weight:700;color:${r.code === 'JPN' ? 'var(--text-muted)' : orColorInv(r.totalOr === Infinity ? 9 : r.totalOr)}">${r.code === 'JPN' ? '1.00' : fmtOr(r.totalOr)}</td>
+          ${r.shotOrs.map(o => `<td class="num" style="font-weight:${r.code === 'JPN' ? '400' : '600'};color:${r.code === 'JPN' ? 'var(--text-muted)' : orColorInv(o.or === Infinity ? 9 : o.or)}">${r.code === 'JPN' ? '1.00' : fmtOr(o.or)}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody></table></div>`;
+      document.getElementById('tmContent').innerHTML += html;
+      makeSortable('tmAtkOrTable'); makeSortable('tmAtkJpnTable'); makeSortable('tmDefOrTable'); makeSortable('tmDefJpnTable');
+    })();
     renderTeamCharts(sorted);
   };
   render();
@@ -790,12 +936,171 @@ function renderShots() {
     <div class="table-container"><table class="data-table" id="shotDetailTable"><thead><tr>
       <th>チーム</th>${types.map(t => `<th>${t.label}</th>`).join('')}<th>合計</th>
     </tr></thead><tbody>
-      ${Object.values(teamStats).sort((a, b) => b.totalG - a.totalG).map(t =>
-    `<tr><td><strong>${t.code}</strong></td>
+      ${rankSort(Object.values(teamStats)).map((t, i) =>
+    `${mainClSep(i, 9)}<tr><td><strong>${t.code}</strong></td>
         ${types.map(ty => `<td class="num">${pct(t[ty.key + 'G'], t[ty.key + 'A'])}%</td>`).join('')}
         <td class="num" style="font-weight:700">${pct(t.totalG, t.totalA)}%</td></tr>`).join('')}
     </tbody></table></div>`;
   makeSortable('shotDetailTable');
+
+  // Offensive Odds Ratio analysis
+  (() => {
+    const orColor = v => v > 1.2 ? 'var(--accent-green)' : v < 0.8 ? 'var(--accent-red)' : 'var(--accent-yellow)';
+    const orLabel = v => v > 1.2 ? '決めやすい ↑' : v < 0.8 ? '決めにくい ↓' : 'Line同等 →';
+    const fmtOr = v => v === Infinity ? '∞' : v > 0 ? v.toFixed(2) : '-';
+
+    // 1. Shot-type OR (Line as reference)
+    const orData = types.map(t => {
+      let g = 0, a = 0; Object.values(teamStats).forEach(ts => { g += ts[t.key + 'G']; a += ts[t.key + 'A']; });
+      const miss = a - g;
+      const odds = miss > 0 ? g / miss : (a > 0 && g === a ? Infinity : 0);
+      return { ...t, goals: g, attempts: a, miss, rate: a ? (g / a * 100).toFixed(1) : '-', odds };
+    });
+    const lineOdds = orData.find(d => d.key === 'line')?.odds || 1;
+    orData.forEach(d => { d.or = lineOdds > 0 ? (d.odds === Infinity ? Infinity : d.odds / lineOdds) : 0; });
+
+    // 2. Team-level OR (JPN as reference)
+    const teamsSorted = rankSort(Object.values(teamStats));
+    const teamOddsMap = {};
+    teamsSorted.forEach(tm => {
+      teamOddsMap[tm.code] = {};
+      types.forEach(t => {
+        const g = tm[t.key + 'G'], a = tm[t.key + 'A'], miss = a - g;
+        teamOddsMap[tm.code][t.key] = { goals: g, attempts: a, miss, odds: miss > 0 ? g / miss : (a > 0 && g === a ? Infinity : 0) };
+      });
+      const miss = tm.totalA - tm.totalG;
+      teamOddsMap[tm.code]._total = { goals: tm.totalG, attempts: tm.totalA, miss, odds: miss > 0 ? tm.totalG / miss : 0 };
+    });
+    const jpnOdds = teamOddsMap['JPN'] || {};
+    const calcTeamOr = (code, key) => {
+      const ref = jpnOdds[key], tm = teamOddsMap[code]?.[key];
+      if (!ref || !tm || ref.odds <= 0 || ref.odds === Infinity || tm.attempts === 0) return 0;
+      return tm.odds === Infinity ? Infinity : tm.odds / ref.odds;
+    };
+    const teamRows = teamsSorted.map(tm => ({
+      code: tm.code, totalRate: tm.totalA ? (tm.totalG / tm.totalA * 100).toFixed(1) : '-',
+      totalOr: calcTeamOr(tm.code, '_total'),
+      shotOrs: types.map(t => ({ key: t.key, or: calcTeamOr(tm.code, t.key) }))
+    })).sort((a, b) => officialRank(a.code) - officialRank(b.code));
+
+    const html = `
+    <div class="section-title" style="margin-top:24px"><span class="icon">📐</span> シュート種類別オッズ比（基準: Line Shot）</div>
+    <div class="chart-card" style="padding:16px 20px;margin-bottom:20px">
+      <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">
+        <strong>オッズ比 (OR)</strong> = 各種別の得点オッズ ÷ Lineの得点オッズ（攻撃視点）<br>
+        <span style="color:var(--accent-green)">OR &gt; 1.2</span>: Lineより決めやすい　
+        <span style="color:var(--accent-yellow)">0.8〜1.2</span>: Line同等　
+        <span style="color:var(--accent-red)">OR &lt; 0.8</span>: Lineより決めにくい
+      </div>
+    </div>
+    <div class="charts-grid">
+      <div class="chart-card"><div class="chart-card-title">📐 オッズ比チャート（vs Line）</div><div class="chart-wrapper" style="height:320px"><canvas id="chartShotOddsRatio"></canvas></div></div>
+      <div class="chart-card"><div class="chart-card-title">📊 種類別オッズ比詳細</div>
+        <div class="table-container"><table class="data-table" id="shotOrSummaryTable"><thead><tr>
+          <th>種類</th><th>得点</th><th>試投</th><th>ミス</th><th>成功率</th><th>オッズ</th><th>OR (vs Line)</th><th>解釈</th>
+        </tr></thead><tbody>
+          ${orData.map(d => `<tr style="${d.key === 'line' ? 'background:rgba(99,115,255,0.08)' : ''}">
+            <td>${d.icon} ${d.label}</td>
+            <td class="num">${d.goals}</td><td class="num">${d.attempts}</td><td class="num">${d.miss}</td>
+            <td class="num">${d.rate}%</td>
+            <td class="num">${d.odds === Infinity ? '∞' : d.odds.toFixed(3)}</td>
+            <td class="num" style="font-weight:700;color:${orColor(d.or === Infinity ? 9 : d.or)}">${fmtOr(d.or)}</td>
+            <td style="color:${orColor(d.or === Infinity ? 9 : d.or)};font-size:0.82rem">${d.key === 'line' ? '基準' : orLabel(d.or === Infinity ? 9 : d.or)}</td>
+          </tr>`).join('')}
+        </tbody></table></div>
+      </div>
+    </div>
+    <div class="section-title" style="margin-top:24px"><span class="icon">🇯🇵</span> 国別シュートオッズ比（基準: JPN）</div>
+    <div class="chart-card" style="padding:16px 20px;margin-bottom:20px">
+      <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">
+        各シュート種類について、日本(JPN)を基準(OR=1.00)とした得点オッズ比。<br>
+        <span style="color:var(--accent-green)">OR &gt; 1.2</span>: JPNより決めやすい　
+        <span style="color:var(--accent-yellow)">0.8〜1.2</span>: JPN同等　
+        <span style="color:var(--accent-red)">OR &lt; 0.8</span>: JPNより決めにくい
+      </div>
+    </div>
+    <div class="table-container"><table class="data-table" id="shotOrTeamTable"><thead><tr>
+      <th>国</th><th>成功率</th><th>総合OR</th>${types.map(t => `<th>${t.label.split(' ')[0]}</th>`).join('')}
+    </tr></thead><tbody>
+      ${teamRows.map((r, i) => `${mainClSep(i, 10)}<tr style="${r.code === 'JPN' ? 'background:rgba(99,115,255,0.08)' : ''}">
+        <td><strong>${r.code}</strong></td>
+        <td class="num">${r.totalRate}%</td>
+        <td class="num" style="font-weight:700;color:${r.code === 'JPN' ? 'var(--text-muted)' : orColor(r.totalOr === Infinity ? 9 : r.totalOr)}">${r.code === 'JPN' ? '1.00' : fmtOr(r.totalOr)}</td>
+        ${r.shotOrs.map(o => `<td class="num" style="font-weight:${r.code === 'JPN' ? '400' : '600'};color:${r.code === 'JPN' ? 'var(--text-muted)' : orColor(o.or === Infinity ? 9 : o.or)}">${r.code === 'JPN' ? '1.00' : fmtOr(o.or)}</td>`).join('')}
+      </tr>`).join('')}
+    </tbody></table></div>
+    ${(() => {
+        // Team-level shot-type OR (each team's Line as reference)
+        const teamOrLineRows = teamsSorted.map(tm => {
+          const tmOrData = types.map(t => {
+            const g = tm[t.key + 'G'], a = tm[t.key + 'A'], miss = a - g;
+            return { key: t.key, odds: miss > 0 ? g / miss : (a > 0 && g === a ? Infinity : 0), attempts: a };
+          });
+          const tmLine = tmOrData.find(d => d.key === 'line')?.odds || 0;
+          const ors = tmOrData.map(d => ({
+            key: d.key,
+            or: (tmLine > 0 && tmLine !== Infinity && d.attempts > 0) ? (d.odds === Infinity ? Infinity : d.odds / tmLine) : (d.key === 'line' ? 1 : 0)
+          }));
+          return { code: tm.code, totalRate: tm.totalA ? (tm.totalG / tm.totalA * 100).toFixed(1) : '-', ors };
+        });
+        return `
+      <div class="section-title" style="margin-top:24px"><span class="icon">🏆</span> チーム別シュートオッズ比（基準: 各チームのLine）</div>
+      <div class="table-container"><table class="data-table" id="shotOrTeamLineTable"><thead><tr>
+        <th>チーム</th><th>成功率</th>${types.map(t => `<th>${t.label.split(' ')[0]}</th>`).join('')}
+      </tr></thead><tbody>
+        ${rankSort(teamOrLineRows).map((r, i) => `${mainClSep(i, 9)}<tr>
+          <td><strong>${r.code}</strong></td>
+          <td class="num">${r.totalRate}%</td>
+          ${r.ors.map(o => `<td class="num" style="font-weight:${o.key === 'line' ? '400' : '600'};color:${o.key === 'line' ? 'var(--text-muted)' : orColor(o.or === Infinity ? 9 : o.or)}">${o.key === 'line' ? '1.00' : fmtOr(o.or === Infinity ? Infinity : o.or)}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody></table></div>`;
+      })()}`;
+    el.innerHTML += html;
+    makeSortable('shotOrSummaryTable'); makeSortable('shotOrTeamTable'); makeSortable('shotOrTeamLineTable');
+
+    // Chart: Shot Odds Ratio
+    if (charts.shotOddsRatio) charts.shotOddsRatio.destroy();
+    charts.shotOddsRatio = new Chart(document.getElementById('chartShotOddsRatio'), {
+      type: 'bar',
+      data: {
+        labels: orData.map(d => d.label.split(' ')[0]),
+        datasets: [{
+          label: 'オッズ比 (vs Line)',
+          data: orData.map(d => d.or === Infinity ? null : +d.or.toFixed(2)),
+          backgroundColor: orData.map(d => {
+            const v = d.or === Infinity ? 9 : d.or;
+            return v > 1.2 ? 'rgba(52,211,153,0.7)' : v < 0.8 ? 'rgba(239,68,68,0.7)' : 'rgba(251,191,36,0.7)';
+          }),
+          borderRadius: 4
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => `OR: ${ctx.raw ?? '∞'} (${(ctx.raw ?? 9) > 1.2 ? '決めやすい' : (ctx.raw ?? 0) < 0.8 ? '決めにくい' : 'Line同等'})` } }
+        },
+        scales: {
+          x: { ticks: { color: '#9a9eb8' }, grid: { color: 'rgba(99,115,255,0.06)' } },
+          y: { ticks: { color: '#9a9eb8', font: { size: 12 } }, grid: { display: false } }
+        }
+      },
+      plugins: [{
+        id: 'shotOrRefLine',
+        afterDraw(chart) {
+          const xScale = chart.scales.x;
+          const x = xScale.getPixelForValue(1.0);
+          const ctx = chart.ctx;
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+          ctx.beginPath(); ctx.moveTo(x, chart.chartArea.top); ctx.lineTo(x, chart.chartArea.bottom); ctx.stroke();
+          ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '10px sans-serif';
+          ctx.fillText('基準 (1.0)', x + 4, chart.chartArea.top + 12);
+          ctx.restore();
+        }
+      }]
+    });
+  })();
 
   const colors = ['#6373ff', '#a855f7', '#00d4ff', '#34d399', '#fb923c', '#f472b6', '#fbbf24'];
   if (charts.shotDist) charts.shotDist.destroy();
@@ -845,7 +1150,7 @@ function renderGoalkeepers() {
       t.saves += g.saves; t.faced += g.faced;
       ['field', 'line', 'wing', 'fast', 'brk', 'free', 'seven'].forEach(k => { t[k + 'S'] += g[k + 'S']; t[k + 'F'] += g[k + 'F']; });
     });
-    const teamSorted = Object.values(teamGK).sort((a, b) => (b.faced ? b.saves / b.faced : 0) - (a.faced ? a.saves / a.faced : 0));
+    const teamSorted = rankSort(Object.values(teamGK));
 
     document.getElementById('gkContent').innerHTML = `
       <div class="stats-grid">
@@ -885,9 +1190,9 @@ function renderGoalkeepers() {
         <th>チーム</th><th>セーブ</th><th>被シュート</th><th>セーブ率</th>
         <th>Field</th><th>Line</th><th>Wing</th><th>Fast</th><th>Brk</th><th>Free</th><th>7m</th>
       </tr></thead><tbody>
-        ${teamSorted.map(t => {
+        ${teamSorted.map((t, i) => {
       const rate = t.faced ? ((t.saves / t.faced) * 100).toFixed(1) : '-';
-      return `<tr><td><strong>${t.code}</strong></td>
+      return `${mainClSep(i, 11)}<tr><td><strong>${t.code}</strong></td>
             <td class="num" style="font-weight:700;color:var(--accent-green)">${t.saves}</td>
             <td class="num">${t.faced}</td>
             <td class="num" style="font-weight:700">${rate}%</td>
@@ -896,9 +1201,227 @@ function renderGoalkeepers() {
             <td class="num">${pct(t.brkS, t.brkF)}%</td><td class="num">${pct(t.freeS, t.freeF)}%</td>
             <td class="num">${pct(t.sevenS, t.sevenF)}%</td></tr>`;
     }).join('')}
-      </tbody></table></div>`;
+      </tbody></table></div>
+      ${(() => {
+        // Odds Ratio calculation (reference: Line Shot)
+        const orTypes = [
+          { key: 'field', label: 'Field Shot', icon: '🏃' }, { key: 'line', label: 'Line Shot (6m)', icon: '📏' },
+          { key: 'wing', label: 'Wing Shot', icon: '🦅' }, { key: 'fast', label: 'Fast Break', icon: '⚡' },
+          { key: 'brk', label: 'Breakthrough', icon: '💥' }, { key: 'free', label: 'Free Throw', icon: '🎯' },
+          { key: 'seven', label: '7m Throw', icon: '7️⃣' }
+        ];
+        const orData = orTypes.map(t => {
+          let s = 0, f = 0; gks.forEach(g => { s += g[t.key + 'S']; f += g[t.key + 'F']; });
+          const goals = f - s;
+          const odds = goals > 0 ? s / goals : 0;
+          return { ...t, saves: s, faced: f, goals, rate: f ? (s / f * 100).toFixed(1) : '-', odds };
+        });
+        const lineOdds = orData.find(d => d.key === 'line')?.odds || 1;
+        orData.forEach(d => { d.or = lineOdds > 0 ? (d.odds / lineOdds) : 0; });
+        const orColor = v => v > 1.2 ? 'var(--accent-green)' : v < 0.8 ? 'var(--accent-red)' : 'var(--accent-yellow)';
+        const orLabel = v => v > 1.2 ? '止めやすい ↑' : v < 0.8 ? '止めにくい ↓' : 'Line同等 →';
 
-    makeSortable('gkTable'); makeSortable('gkTeamTable');
+        // Team-level OR
+        const teamOrRows = teamSorted.map(tm => {
+          const tmOrData = orTypes.map(t => {
+            const s = tm[t.key + 'S'], f = tm[t.key + 'F'], g = f - s;
+            return { key: t.key, odds: g > 0 ? s / g : 0, faced: f };
+          });
+          const tmLineOdds = tmOrData.find(d => d.key === 'line')?.odds || 0;
+          const ors = tmOrData.map(d => ({ key: d.key, or: tmLineOdds > 0 && d.faced > 0 ? d.odds / tmLineOdds : 0 }));
+          return { code: tm.code, ors };
+        });
+
+        return `
+      <div class="section-title" style="margin-top:24px"><span class="icon">📐</span> シュート種類別オッズ比（基準: Line Shot）</div>
+      <div class="chart-card" style="padding:16px 20px;margin-bottom:20px">
+        <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">
+          <strong>オッズ比 (OR)</strong> = 各種別のセーブオッズ ÷ Lineのセーブオッズ<br>
+          <span style="color:var(--accent-green)">OR &gt; 1.2</span>: Lineより止めやすい　
+          <span style="color:var(--accent-yellow)">0.8〜1.2</span>: Line同等　
+          <span style="color:var(--accent-red)">OR &lt; 0.8</span>: Lineより止めにくい
+        </div>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card"><div class="chart-card-title">📐 オッズ比チャート（vs Line）</div><div class="chart-wrapper" style="height:320px"><canvas id="chartGkOddsRatio"></canvas></div></div>
+        <div class="chart-card"><div class="chart-card-title">📊 種類別オッズ比詳細</div>
+          <div class="table-container"><table class="data-table" id="orSummaryTable"><thead><tr>
+            <th>種類</th><th>セーブ</th><th>被シュート</th><th>失点</th><th>セーブ率</th><th>オッズ</th><th>OR (vs Line)</th><th>解釈</th>
+          </tr></thead><tbody>
+            ${orData.map(d => `<tr style="${d.key === 'line' ? 'background:rgba(99,115,255,0.08)' : ''}">
+              <td>${d.icon} ${d.label}</td>
+              <td class="num">${d.saves}</td><td class="num">${d.faced}</td><td class="num">${d.goals}</td>
+              <td class="num">${d.rate}%</td>
+              <td class="num">${d.odds.toFixed(3)}</td>
+              <td class="num" style="font-weight:700;color:${orColor(d.or)}">${d.or.toFixed(2)}</td>
+              <td style="color:${orColor(d.or)};font-size:0.82rem">${d.key === 'line' ? '基準' : orLabel(d.or)}</td>
+            </tr>`).join('')}
+          </tbody></table></div>
+        </div>
+      </div>
+      <div class="section-title" style="margin-top:24px"><span class="icon">🏆</span> チーム別オッズ比</div>
+      <div class="table-container"><table class="data-table" id="orTeamTable"><thead><tr>
+        <th>チーム</th>${orTypes.map(t => `<th>${t.label.split(' ')[0]}</th>`).join('')}
+      </tr></thead><tbody>
+        ${rankSort(teamOrRows).map((tr, i) => `${mainClSep(i, 8)}<tr><td><strong>${tr.code}</strong></td>
+          ${tr.ors.map(o => `<td class="num" style="font-weight:${o.key === 'line' ? '400' : '600'};color:${o.key === 'line' ? 'var(--text-muted)' : orColor(o.or)}">${o.or > 0 ? o.or.toFixed(2) : '-'}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody></table></div>
+      ${(() => {
+            // Player-level OR
+            const plOrRows = sorted.filter(g => g.faced >= 5).map(g => {
+              const plOrData = orTypes.map(t => {
+                const s = g[t.key + 'S'], f = g[t.key + 'F'], gl = f - s;
+                return { key: t.key, odds: gl > 0 ? s / gl : (f > 0 && s === f ? Infinity : 0), faced: f };
+              });
+              const plLineOdds = plOrData.find(d => d.key === 'line')?.odds || 0;
+              const ors = plOrData.map(d => ({
+                key: d.key,
+                or: (plLineOdds > 0 && plLineOdds !== Infinity && d.faced > 0) ? (d.odds === Infinity ? Infinity : d.odds / plLineOdds) : (d.key === 'line' ? 1 : 0)
+              }));
+              return { number: g.number, name: g.name, team: g.team, faced: g.faced, saves: g.saves, ors };
+            });
+            const fmtOr = v => v === Infinity ? '∞' : v > 0 ? v.toFixed(2) : '-';
+            return `
+      <div class="section-title" style="margin-top:24px"><span class="icon">⭐</span> GK選手別オッズ比</div>
+      <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px">※ 被シュート5本以上のGKのみ表示</div>
+      <div class="table-container"><table class="data-table" id="orPlayerTable"><thead><tr>
+        <th>#</th><th>選手</th><th>チーム</th><th>被シュート</th><th>セーブ率</th>${orTypes.map(t => `<th>${t.label.split(' ')[0]}</th>`).join('')}
+      </tr></thead><tbody>
+        ${plOrRows.map((p, i) => {
+              const rate = ((p.saves / p.faced) * 100).toFixed(1);
+              const rb = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : 'default';
+              return `<tr><td><span class="rank-badge ${rb}">${i + 1}</span></td>
+            <td><strong>#${p.number} ${p.name}</strong></td><td>${p.team}</td>
+            <td class="num">${p.faced}</td><td class="num" style="font-weight:600">${rate}%</td>
+            ${p.ors.map(o => `<td class="num" style="font-weight:${o.key === 'line' ? '400' : '600'};color:${o.key === 'line' ? 'var(--text-muted)' : orColor(o.or === Infinity ? 9 : o.or)}">${o.key === 'line' ? '1.00' : fmtOr(o.or)}</td>`).join('')}
+          </tr>`;
+            }).join('')}
+      </tbody></table></div>`;
+          })()}`;
+      })()}`;
+
+    makeSortable('gkTable'); makeSortable('gkTeamTable'); makeSortable('orSummaryTable'); makeSortable('orTeamTable'); makeSortable('orPlayerTable');
+
+    // Team vs JPN Odds Ratio table
+    (() => {
+      const shotKeys = [
+        { key: 'field', label: 'Field' }, { key: 'line', label: 'Line' }, { key: 'wing', label: 'Wing' },
+        { key: 'fast', label: 'Fast Brk' }, { key: 'brk', label: 'Brk Thr' }, { key: 'free', label: 'Free' }, { key: 'seven', label: '7m' }
+      ];
+      // Compute odds per team per shot type
+      const teamOddsMap = {};
+      teamSorted.forEach(tm => {
+        teamOddsMap[tm.code] = {};
+        shotKeys.forEach(t => {
+          const s = tm[t.key + 'S'], f = tm[t.key + 'F'], g = f - s;
+          teamOddsMap[tm.code][t.key] = { saves: s, faced: f, goals: g, odds: g > 0 ? s / g : (f > 0 && s === f ? Infinity : 0) };
+        });
+        // Total
+        const g = tm.faced - tm.saves;
+        teamOddsMap[tm.code]._total = { saves: tm.saves, faced: tm.faced, goals: g, odds: g > 0 ? tm.saves / g : 0 };
+      });
+      const jpnOdds = teamOddsMap['JPN'] || {};
+      const orColor = v => v > 1.2 ? 'var(--accent-green)' : v < 0.8 ? 'var(--accent-red)' : 'var(--accent-yellow)';
+      const fmtOr = v => v === Infinity ? '∞' : v > 0 ? v.toFixed(2) : '-';
+      const calcOr = (teamCode, key) => {
+        const ref = jpnOdds[key];
+        const tm = teamOddsMap[teamCode]?.[key];
+        if (!ref || !tm || ref.odds <= 0 || ref.odds === Infinity || tm.faced === 0) return { or: 0, faced: tm?.faced || 0 };
+        const or = tm.odds === Infinity ? Infinity : tm.odds / ref.odds;
+        return { or, faced: tm.faced };
+      };
+
+      // Sort by total OR descending
+      const rows = teamSorted.map(tm => {
+        const totalOr = calcOr(tm.code, '_total');
+        const shotOrs = shotKeys.map(t => ({ key: t.key, ...calcOr(tm.code, t.key) }));
+        return { code: tm.code, totalOr, shotOrs, totalRate: tm.faced ? ((tm.saves / tm.faced) * 100).toFixed(1) : '-' };
+      }).sort((a, b) => officialRank(a.code) - officialRank(b.code));
+
+      const html = `
+      <div class="section-title" style="margin-top:24px"><span class="icon">🇯🇵</span> 国別オッズ比（基準: JPN）</div>
+      <div class="chart-card" style="padding:16px 20px;margin-bottom:20px">
+        <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">
+          各シュート種類について、日本(JPN)を基準(OR=1.00)としたオッズ比。<br>
+          <span style="color:var(--accent-green)">OR &gt; 1.2</span>: JPNより止めやすい　
+          <span style="color:var(--accent-yellow)">0.8〜1.2</span>: JPN同等　
+          <span style="color:var(--accent-red)">OR &lt; 0.8</span>: JPNより止めにくい
+        </div>
+      </div>
+      <div class="table-container"><table class="data-table" id="orVsJpnTable"><thead><tr>
+        <th>国</th><th>セーブ率</th><th>総合OR</th>${shotKeys.map(t => `<th>${t.label}</th>`).join('')}
+      </tr></thead><tbody>
+        ${rows.map((r, i) => `${mainClSep(i, 10)}<tr style="${r.code === 'JPN' ? 'background:rgba(99,115,255,0.08)' : ''}">
+          <td><strong>${r.code}</strong></td>
+          <td class="num">${r.totalRate}%</td>
+          <td class="num" style="font-weight:700;color:${r.code === 'JPN' ? 'var(--text-muted)' : orColor(r.totalOr.or === Infinity ? 9 : r.totalOr.or)}">${r.code === 'JPN' ? '1.00' : fmtOr(r.totalOr.or)}</td>
+          ${r.shotOrs.map(o => `<td class="num" style="font-weight:${r.code === 'JPN' ? '400' : '600'};color:${r.code === 'JPN' ? 'var(--text-muted)' : orColor(o.or === Infinity ? 9 : o.or)}">${r.code === 'JPN' ? '1.00' : fmtOr(o.or)}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody></table></div>`;
+      document.getElementById('gkContent').innerHTML += html;
+      makeSortable('orVsJpnTable');
+    })();
+
+    // Chart: Odds Ratio
+    (() => {
+      const orTypes = [
+        { key: 'field', label: 'Field' }, { key: 'line', label: 'Line' }, { key: 'wing', label: 'Wing' },
+        { key: 'fast', label: 'Fast Brk' }, { key: 'brk', label: 'Brk Thr' }, { key: 'free', label: 'Free' }, { key: 'seven', label: '7m' }
+      ];
+      const orCalc = orTypes.map(t => {
+        let s = 0, f = 0; gks.forEach(g => { s += g[t.key + 'S']; f += g[t.key + 'F']; });
+        const goals = f - s;
+        return { ...t, odds: goals > 0 ? s / goals : 0 };
+      });
+      const lineOdds = orCalc.find(d => d.key === 'line')?.odds || 1;
+      orCalc.forEach(d => { d.or = lineOdds > 0 ? d.odds / lineOdds : 0; });
+
+      if (charts.gkOddsRatio) charts.gkOddsRatio.destroy();
+      charts.gkOddsRatio = new Chart(document.getElementById('chartGkOddsRatio'), {
+        type: 'bar',
+        data: {
+          labels: orCalc.map(d => d.label),
+          datasets: [{
+            label: 'オッズ比 (vs Line)',
+            data: orCalc.map(d => +d.or.toFixed(2)),
+            backgroundColor: orCalc.map(d => d.or > 1.2 ? 'rgba(52,211,153,0.7)' : d.or < 0.8 ? 'rgba(239,68,68,0.7)' : 'rgba(251,191,36,0.7)'),
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => `OR: ${ctx.raw} (${ctx.raw > 1.2 ? '止めやすい' : ctx.raw < 0.8 ? '止めにくい' : 'Line同等'})` } }
+          },
+          scales: {
+            x: { ticks: { color: '#9a9eb8' }, grid: { color: 'rgba(99,115,255,0.06)' } },
+            y: { ticks: { color: '#9a9eb8', font: { size: 12 } }, grid: { display: false } }
+          }
+        },
+        plugins: [{
+          id: 'orReferenceLine',
+          afterDraw(chart) {
+            const xScale = chart.scales.x;
+            const x = xScale.getPixelForValue(1.0);
+            const ctx = chart.ctx;
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            ctx.moveTo(x, chart.chartArea.top);
+            ctx.lineTo(x, chart.chartArea.bottom);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            ctx.font = '10px sans-serif';
+            ctx.fillText('基準 (1.0)', x + 4, chart.chartArea.top + 12);
+            ctx.restore();
+          }
+        }]
+      });
+    })();
 
     // Chart: Save Rate Top 10
     const top10 = sorted.slice(0, 10);
