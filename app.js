@@ -360,6 +360,11 @@ function renderScatter(ts) {
 
   sec.innerHTML = `
     <div class="section-title"><span class="icon">\ud83d\udcca</span> \u653b\u6483\u6210\u529f\u7387 vs \u5b88\u5099\u6210\u529f\u7387 \u6563\u5e03\u56f3</div>
+    <div class="chart-card" style="padding:14px 20px;margin-bottom:16px"><div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.7">
+      横軸は攻撃成功率（総得点÷総攻撃回数）、縦軸は守備成功率（1−総失点÷総守備回数）を示しています。<br>
+      攻撃は<strong style="color:var(--accent-cyan)">右方</strong>にあるほど、守備は<strong style="color:var(--accent-green)">上方</strong>にあるほど良い結果です。<br>
+      したがって、<strong style="color:var(--accent-yellow)">右上方</strong>にあるチームほど攻守ともに良い結果であったといえます。
+    </div></div>
     <div class="charts-grid">
       <div class="chart-card" style="grid-column:1/-1"><div class="chart-wrapper" style="height:500px"><canvas id="chartScatter"></canvas></div></div>
     </div>
